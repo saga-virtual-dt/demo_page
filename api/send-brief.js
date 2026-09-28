@@ -385,7 +385,7 @@ export default async function handler(req, res) {
     });
 
     await transporter.sendMail({
-      from: `"Formulário de Briefing" <${SMTP_USER}>`,
+      from: `"Formulário de Briefing" <${MAIL_FROM}>`,
       to: process.env.MAIL_TO || DEFAULT_TO,
       replyTo: contactEmail,
       subject: cleanText(
