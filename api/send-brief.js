@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer'
+import nodemailer from "nodemailer";
 
 // ───────────────────────────────────────────────────────────
 // POST /api/send-brief
@@ -14,65 +14,70 @@ import nodemailer from 'nodemailer'
 //                   ex: https://seusite.vercel.app)
 // ───────────────────────────────────────────────────────────
 
-const DEFAULT_TO = 'virtusaga447@gmail.com'
+const DEFAULT_TO = "virtusaga447@gmail.com";
 
 // Rate limit simples em memória (por instância da função).
 // Suficiente para coibir abuso trivial; para um limite robusto e
 // consistente entre instâncias, use um serviço externo como
 // Upstash Redis (@upstash/ratelimit) em produção com alto tráfego.
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000 // 15 min
-const RATE_LIMIT_MAX = 5
-const hits = new Map()
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 min
+const RATE_LIMIT_MAX = 5;
+const hits = new Map();
 
 // Tempo mínimo (ms) entre o carregamento do formulário e o envio.
 // Bots costumam enviar quase instantaneamente.
-const MIN_FILL_TIME_MS = 4000
+const MIN_FILL_TIME_MS = 4000;
 
 const MAX_LEN = {
   short: 160,
   medium: 400,
   long: 2000,
-}
+};
 
 function getIp(req) {
-  const fwd = req.headers['x-forwarded-for']
-  if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim()
-  return req.socket?.remoteAddress || 'unknown'
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length > 0)
+    return fwd.split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
 }
 
 function isRateLimited(ip) {
-  const now = Date.now()
-  const timestamps = (hits.get(ip) || []).filter((t) => now - t < RATE_LIMIT_WINDOW_MS)
-  timestamps.push(now)
-  hits.set(ip, timestamps)
-  return timestamps.length > RATE_LIMIT_MAX
+  const now = Date.now();
+  const timestamps = (hits.get(ip) || []).filter(
+    (t) => now - t < RATE_LIMIT_WINDOW_MS,
+  );
+  timestamps.push(now);
+  hits.set(ip, timestamps);
+  return timestamps.length > RATE_LIMIT_MAX;
 }
 
 // Remove quebras de linha e caracteres de controle (evita injeção
 // de cabeçalhos SMTP) e corta o tamanho máximo.
 function cleanText(value, maxLen = MAX_LEN.medium) {
-  if (typeof value !== 'string') return ''
+  if (typeof value !== "string") return "";
   return value
-    .replace(/[\r\n\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
+    .replace(/[\r\n\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .trim()
-    .slice(0, maxLen)
+    .slice(0, maxLen);
 }
 
 function cleanMultiline(value, maxLen = MAX_LEN.long) {
-  if (typeof value !== 'string') return ''
+  if (typeof value !== "string") return "";
   return value
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .trim()
-    .slice(0, maxLen)
+    .slice(0, maxLen);
 }
 
 function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= MAX_LEN.short
+  return (
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= MAX_LEN.short
+  );
 }
 
 function cleanArray(arr, maxItems, mapFn) {
-  if (!Array.isArray(arr)) return []
-  return arr.slice(0, maxItems).map(mapFn).filter(Boolean)
+  if (!Array.isArray(arr)) return [];
+  return arr.slice(0, maxItems).map(mapFn).filter(Boolean);
 }
 
 function buildEmailBody(d) {
@@ -109,7 +114,7 @@ function buildEmailBody(d) {
     `Eyebrow: ${d.eyebrow}`,
     `Headline: ${d.headline}`,
     `Subheadline: ${d.subheadline}`,
-    `Diferenciais: ${d.heroBullets.join(' | ')}`,
+    `Diferenciais: ${d.heroBullets.join(" | ")}`,
     ``,
     `── Estatísticas ──`,
     ...d.stats.map((s) => `${s.value} — ${s.label}`),
@@ -123,72 +128,90 @@ function buildEmailBody(d) {
     `── CTA final ──`,
     `Título: ${d.finalCtaTitle}`,
     `Subtítulo: ${d.finalCtaSubtitle}`,
-  ]
-  return lines.join('\n')
+  ];
+  return lines.join("\n");
 }
 
 export default async function handler(req, res) {
   // Restringe a origem em produção, se configurada.
-  const allowedOrigin = process.env.ALLOWED_ORIGIN
+  const allowedOrigin = process.env.ALLOWED_ORIGIN;
   if (allowedOrigin) {
-    res.setHeader('Access-Control-Allow-Origin', allowedOrigin)
-    res.setHeader('Vary', 'Origin')
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+    res.setHeader("Vary", "Origin");
   }
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === 'OPTIONS') return res.status(204).end()
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Método não permitido' })
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "POST")
+    return res.status(405).json({ ok: false, error: "Método não permitido" });
 
   if (allowedOrigin) {
-    const origin = req.headers.origin
+    const origin = req.headers.origin;
     if (origin && origin !== allowedOrigin) {
-      return res.status(403).json({ ok: false, error: 'Origem não permitida' })
+      return res.status(403).json({ ok: false, error: "Origem não permitida" });
     }
   }
 
-  const ip = getIp(req)
+  const ip = getIp(req);
   if (isRateLimited(ip)) {
-    return res.status(429).json({ ok: false, error: 'Muitas solicitações. Tente novamente mais tarde.' })
+    return res
+      .status(429)
+      .json({
+        ok: false,
+        error: "Muitas solicitações. Tente novamente mais tarde.",
+      });
   }
 
-  let body = req.body
-  if (typeof body === 'string') {
+  let body = req.body;
+  if (typeof body === "string") {
     try {
-      body = JSON.parse(body)
+      body = JSON.parse(body);
     } catch {
-      return res.status(400).json({ ok: false, error: 'JSON inválido' })
+      return res.status(400).json({ ok: false, error: "JSON inválido" });
     }
   }
-  if (!body || typeof body !== 'object') {
-    return res.status(400).json({ ok: false, error: 'Corpo da requisição inválido' })
+  if (!body || typeof body !== "object") {
+    return res
+      .status(400)
+      .json({ ok: false, error: "Corpo da requisição inválido" });
   }
 
   // Honeypot: campo escondido que só um bot preencheria.
-  if (cleanText(body.website, 200) !== '') {
+  if (cleanText(body.website, 200) !== "") {
     // Responde como sucesso para não revelar a lógica antispam ao bot.
-    return res.status(200).json({ ok: true })
+    return res.status(200).json({ ok: true });
   }
 
   // Verifica tempo mínimo de preenchimento.
-  const startedAt = Number(body.startedAt)
-  if (!Number.isFinite(startedAt) || Date.now() - startedAt < MIN_FILL_TIME_MS) {
-    return res.status(400).json({ ok: false, error: 'Envio muito rápido, tente novamente.' })
+  const startedAt = Number(body.startedAt);
+  if (
+    !Number.isFinite(startedAt) ||
+    Date.now() - startedAt < MIN_FILL_TIME_MS
+  ) {
+    return res
+      .status(400)
+      .json({ ok: false, error: "Envio muito rápido, tente novamente." });
   }
 
   // Sanitização e validação dos campos obrigatórios.
-  const contactName = cleanText(body.contactName, MAX_LEN.short)
-  const contactPhone = cleanText(body.contactPhone, 40)
-  const contactEmail = cleanText(body.contactEmail, MAX_LEN.short)
-  const brandName = cleanText(body.brandName, MAX_LEN.short)
-  const headline = cleanText(body.headline, MAX_LEN.medium)
+  const contactName = cleanText(body.contactName, MAX_LEN.short);
+  const contactPhone = cleanText(body.contactPhone, 40);
+  const contactEmail = cleanText(body.contactEmail, MAX_LEN.short);
+  const brandName = cleanText(body.brandName, MAX_LEN.short);
+  const headline = cleanText(body.headline, MAX_LEN.medium);
 
   if (!contactName || !isValidEmail(contactEmail) || !brandName || !headline) {
-    return res.status(400).json({ ok: false, error: 'Preencha ao menos nome, e-mail, nome da empresa e headline.' })
+    return res
+      .status(400)
+      .json({
+        ok: false,
+        error: "Preencha ao menos nome, e-mail, nome da empresa e headline.",
+      });
   }
 
-  const addr = body.address || {}
-  const colors = body.colors || {}
+  const addr = body.address || {};
+  const colors = body.colors || {};
 
   const data = {
     contactName,
@@ -208,10 +231,10 @@ export default async function handler(req, res) {
       city: cleanText(addr.city, MAX_LEN.short),
       state: cleanText(addr.state, 10),
       zip: cleanText(addr.zip, 20),
-      country: cleanText(addr.country, 10) || 'BR',
+      country: cleanText(addr.country, 10) || "BR",
     },
     mapEmbedUrl: cleanText(body.mapEmbedUrl, MAX_LEN.medium),
-    schemaType: cleanText(body.schemaType, MAX_LEN.short) || 'LocalBusiness',
+    schemaType: cleanText(body.schemaType, MAX_LEN.short) || "LocalBusiness",
     colors: {
       paper: cleanText(colors.paper, 20),
       paper2: cleanText(colors.paper2, 20),
@@ -224,7 +247,9 @@ export default async function handler(req, res) {
     eyebrow: cleanText(body.eyebrow, MAX_LEN.medium),
     headline,
     subheadline: cleanText(body.subheadline, MAX_LEN.medium),
-    heroBullets: cleanArray(body.heroBullets, 6, (b) => cleanText(b, MAX_LEN.short)),
+    heroBullets: cleanArray(body.heroBullets, 6, (b) =>
+      cleanText(b, MAX_LEN.short),
+    ),
     stats: cleanArray(body.stats, 6, (s) => ({
       value: cleanText(s?.value, 40),
       label: cleanText(s?.label, MAX_LEN.short),
@@ -239,12 +264,19 @@ export default async function handler(req, res) {
     })),
     finalCtaTitle: cleanText(body.finalCtaTitle, MAX_LEN.medium),
     finalCtaSubtitle: cleanText(body.finalCtaSubtitle, MAX_LEN.medium),
-  }
+  };
 
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    console.error('SMTP não configurado — defina SMTP_HOST/PORT/USER/PASS nas variáveis de ambiente da Vercel.')
-    return res.status(500).json({ ok: false, error: 'Envio de e-mail não configurado no servidor.' })
+    console.error(
+      "SMTP não configurado — defina SMTP_HOST/PORT/USER/PASS nas variáveis de ambiente da Vercel.",
+    );
+    return res
+      .status(500)
+      .json({
+        ok: false,
+        error: "Envio de e-mail não configurado no servidor.",
+      });
   }
 
   try {
@@ -253,19 +285,27 @@ export default async function handler(req, res) {
       port: Number(SMTP_PORT),
       secure: Number(SMTP_PORT) === 465,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
-    })
+    });
 
     await transporter.sendMail({
-      from: `"Formulário de Briefing" <${SMTP_USER}>`,
+      from: process.env.MAIL_FROM,
       to: process.env.MAIL_TO || DEFAULT_TO,
       replyTo: contactEmail,
-      subject: cleanText(`Novo briefing de landing page — ${brandName}`, MAX_LEN.short),
+      subject: cleanText(
+        `Novo briefing de landing page — ${brandName}`,
+        MAX_LEN.short,
+      ),
       text: buildEmailBody(data),
-    })
+    });
 
-    return res.status(200).json({ ok: true })
+    return res.status(200).json({ ok: true });
   } catch (err) {
-    console.error('Falha ao enviar e-mail:', err)
-    return res.status(502).json({ ok: false, error: 'Não foi possível enviar o e-mail agora. Tente novamente.' })
+    console.error("Falha ao enviar e-mail:", err);
+    return res
+      .status(502)
+      .json({
+        ok: false,
+        error: "Não foi possível enviar o e-mail agora. Tente novamente.",
+      });
   }
 }
