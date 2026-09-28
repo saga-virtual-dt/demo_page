@@ -132,6 +132,109 @@ function buildEmailBody(d) {
   return lines.join("\n");
 }
 
+// Gera o texto do client.js já preenchido, pronto para colar em
+// src/config/client.js. JSON.stringify escapa aspas/quebras de linha
+// com segurança — o resultado é sempre JS válido, mesmo que o
+// cliente digite aspas, barras invertidas etc. nos campos.
+function buildClientConfigFile(d) {
+  const s = (v) => JSON.stringify(v || "");
+  const bulletsBlock = (d.heroBullets.length ? d.heroBullets : ["", "", "", ""])
+    .map((b) => `    ${s(b)},`)
+    .join("\n");
+  const statsBlock = d.stats
+    .map((st) => `    { value: ${s(st.value)}, label: ${s(st.label)} },`)
+    .join("\n");
+  const servicesBlock = d.services
+    .map(
+      (sv) =>
+        `    { title: ${s(sv.title)}, description: ${s(sv.description)} },`,
+    )
+    .join("\n");
+  const testimonialsBlock = d.testimonials
+    .map((t) => `    { quote: ${s(t.quote)}, author: ${s(t.author)} },`)
+    .join("\n");
+
+  return `// Solicitado por: ${d.contactName} <${d.contactEmail}> — ${d.contactPhone}
+// Gerado automaticamente pelo formulário /solicitar
+
+const client = {
+  // SEO / metadados
+  brandName: ${s(d.brandName)},
+  seoTitle: ${s(d.seoTitle)},
+  seoDescription:
+    ${s(d.seoDescription)},
+  siteUrl: ${s(d.siteUrl)},
+
+  // Contato
+  whatsapp: ${s(d.whatsapp)}, // só números, com DDI+DDD
+  whatsappMessage: ${s(d.whatsappMessage)},
+  instagramHandle: ${s(d.instagramHandle)},
+  instagramUrl: ${s(d.instagramUrl)},
+  phoneDisplay: ${s(d.phoneDisplay)},
+
+  // Endereço (usado no rodapé, seção de localização e Schema.org)
+  address: {
+    street: ${s(d.address.street)},
+    city: ${s(d.address.city)},
+    state: ${s(d.address.state)},
+    zip: ${s(d.address.zip)},
+    country: ${s(d.address.country)},
+  },
+  mapEmbedUrl:
+    ${s(d.mapEmbedUrl)},
+
+  // Schema.org (ajuste o @type: LocalBusiness, Dentist, Restaurant, Store, etc.)
+  schemaType: ${s(d.schemaType)},
+
+  // Paleta — cada landing pode ter uma identidade visual diferente
+  colors: {
+    paper: ${s(d.colors.paper)},
+    paper2: ${s(d.colors.paper2)},
+    ink: ${s(d.colors.ink)},
+    brand: ${s(d.colors.brand)},
+    brandDark: ${s(d.colors.brandDark)},
+    trust: ${s(d.colors.trust)},
+    line: ${s(d.colors.line)},
+  },
+
+  // Hero
+  eyebrow: ${s(d.eyebrow)},
+  headline: ${s(d.headline)},
+  subheadline: ${s(d.subheadline)},
+  heroBullets: [
+${bulletsBlock}
+  ],
+
+  // Barra de confiança (estatísticas rápidas)
+  stats: [
+${statsBlock}
+  ],
+
+  // Serviços / produtos (grid)
+  services: [
+${servicesBlock}
+  ],
+
+  // Depoimentos
+  testimonials: [
+${testimonialsBlock}
+  ],
+
+  // CTA final
+  finalCtaTitle: ${s(d.finalCtaTitle)},
+  finalCtaSubtitle: ${s(d.finalCtaSubtitle)},
+
+  navLinks: [
+    { label: 'Serviços', href: '#servicos' },
+    { label: 'Depoimentos', href: '#depoimentos' },
+    { label: 'Como chegar', href: '#local' },
+  ],
+}
+
+export default client
+`;
+}
+
 export default async function handler(req, res) {
   // Restringe a origem em produção, se configurada.
   const allowedOrigin = process.env.ALLOWED_ORIGIN;
@@ -155,12 +258,10 @@ export default async function handler(req, res) {
 
   const ip = getIp(req);
   if (isRateLimited(ip)) {
-    return res
-      .status(429)
-      .json({
-        ok: false,
-        error: "Muitas solicitações. Tente novamente mais tarde.",
-      });
+    return res.status(429).json({
+      ok: false,
+      error: "Muitas solicitações. Tente novamente mais tarde.",
+    });
   }
 
   let body = req.body;
@@ -202,12 +303,10 @@ export default async function handler(req, res) {
   const headline = cleanText(body.headline, MAX_LEN.medium);
 
   if (!contactName || !isValidEmail(contactEmail) || !brandName || !headline) {
-    return res
-      .status(400)
-      .json({
-        ok: false,
-        error: "Preencha ao menos nome, e-mail, nome da empresa e headline.",
-      });
+    return res.status(400).json({
+      ok: false,
+      error: "Preencha ao menos nome, e-mail, nome da empresa e headline.",
+    });
   }
 
   const addr = body.address || {};
@@ -271,12 +370,10 @@ export default async function handler(req, res) {
     console.error(
       "SMTP não configurado — defina SMTP_HOST/PORT/USER/PASS nas variáveis de ambiente da Vercel.",
     );
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        error: "Envio de e-mail não configurado no servidor.",
-      });
+    return res.status(500).json({
+      ok: false,
+      error: "Envio de e-mail não configurado no servidor.",
+    });
   }
 
   try {
@@ -288,7 +385,7 @@ export default async function handler(req, res) {
     });
 
     await transporter.sendMail({
-      from: process.env.MAIL_FROM,
+      from: `"Formulário de Briefing" <${SMTP_USER}>`,
       to: process.env.MAIL_TO || DEFAULT_TO,
       replyTo: contactEmail,
       subject: cleanText(
@@ -296,16 +393,26 @@ export default async function handler(req, res) {
         MAX_LEN.short,
       ),
       text: buildEmailBody(data),
+      attachments: [
+        {
+          filename: `client-${
+            data.brandName
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .slice(0, 40) || "briefing"
+          }.txt`,
+          content: buildClientConfigFile(data),
+          contentType: "text/plain; charset=utf-8",
+        },
+      ],
     });
 
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("Falha ao enviar e-mail:", err);
-    return res
-      .status(502)
-      .json({
-        ok: false,
-        error: "Não foi possível enviar o e-mail agora. Tente novamente.",
-      });
+    return res.status(502).json({
+      ok: false,
+      error: "Não foi possível enviar o e-mail agora. Tente novamente.",
+    });
   }
 }
